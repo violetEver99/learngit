@@ -1,0 +1,391 @@
+def addMission(requset):
+    try:
+	    user = requset.user.username
+		mid = request.POST.get("mid")
+		sendername = request.POST.get("sendername")
+		senderphone = request.POST.get("senderphone")
+		majorcity = requset.POST.get("majorcity")
+		assistcity = request.POST.get("assistcity")
+		direction = requset.POST.get("direction")
+		
+		receiveCity = filter(lambda item:item,[majorcity,assistcity]  )
+		
+		row = {
+		     "ip":request.POST.get("ip"),
+			 "controlip":request.POST.get("controlip"),
+			 "url":request.POST.get("url"),
+			 "email":request.POST.get("email"),
+			 "email2":request.POST.get("email2"),
+			 "hostfeature":request.POST.get("hostfeature"),
+			 "direction":direction,
+			 "city":receiveCity,
+			 "unit":"",
+			 "remark":"",
+			 "report":"",
+			 "location":request.POST.get("location"),
+			 "time":request.POST.get("time"),
+			 
+		}
+	for key in row:
+	    try:
+		    row[key] = json.loads(row[key])
+		except:
+		    pass
+	fileToKeep = []
+	
+	fileList = map(lambda x : os.pathbasename(x),request.POST.get("hostfeature").split(","))
+	
+	fileToKeep.extend(filter(lambda x: x and x not in fileToKeep, fileList ) )
+	for item in fileToKeep:
+	    Files.objects.filter(name=item).update(stay = F("stay") + 1  )
+	Files.objects.filter(stay = 0).update(delete = F('delete') + 1 )
+	for item in Files.objects.filter(delete__gt = 50):
+	    os.remove(item.path)
+		item.delete()
+	newmission = Mission.objects.create(sender = user,
+	                                    mid = mid,
+										majorcity = majorcity,
+										assistcity = assistcity,
+										date = datetime.datetime.now(),
+										status = 0,
+										sendername = sendername,
+										senderphone = senderphone,
+										direction =direction
+	)
+	row["mission"] = newmission.id
+	newclue = es.index(index = "clue", doc_type= "clue", body = row)
+	newmission.dataid = newclue["_id"]
+	newmission.save()
+	
+	for city in receivecCity:
+	    receivers = []
+		groups = Group.objects.filter(group_perms__perms__data = city)
+		for item in groups:
+		    receivers.extend( map(lambda x : x.username, item.user_set.all() )  )
+			if not receivers:
+			    continue
+			missionCounts = Misssion.objects.filter ( Q(majorcity=city,status = 0)| Q(assistcity=city ,stasus = 0) ).count()
+	        message = "<a href='/data/missionview' target='_blank'>" + u"您有" + str(missionCounts) + u"个新任务！" + "</a>"
+	        wrappedMessage = json.dumps({"message":message,"sender":u"任务提醒", "broadcast":2,"missioncounts":1,"type":"newmission","date":datetime.datetime.strftime(datetime.datetime.now(),"%Y-%m-%d %H:%M:%S")})
+	        redisMessage =RedisMessage (wrappedMessage)
+			redis_publisher = RedisPublisher( facility='foobar', users= receivers )
+			redis_publisher.publish_massage(redisMessage)
+	    
+		action = "发布任务"
+		writeLog(request,action)
+		return HttpResponse( '{"code":0}')
+	except:
+        logger.debug(traceback.format_exc() )
+        print traceback.format_exc()
+        return HttpResponse( '{"code":1,"msg":"服务器异常"} ')		
+	    
+		
+		
+		
+def delUnit(request):
+    try:
+	    ids = request.POST["ids"].split(",")
+		for _id in ids:
+		    es.delete(index = "clue", doc_type = "clue", id = _id, refresh = True )
+		return HttpResponse( '{"code":0}' )
+	except:
+	    logger.debug(traceback.format.exc() )
+		print traceback.format.exc()
+		return HttpResponse( '{"code":1,"msg":"服务器异常"}')
+		
+		
+def addClue(request):
+    try:
+	    op = request.POST["op"]
+		row = { "city":request.user.groups.get().group_perms_set.filter(perms__datatype="city")[0].perms.data,"mission":-1 }
+		fileToKeep = []
+		for key in request.POST.keys():
+		    if key in ["op","_id"]:
+			    continue
+			else:
+			    data = json.loads(request.POST.get(key,None))
+			    if key.find("new") != -1:
+				    row["custom"].append(data)
+				else:
+				    try:
+					    row[key] = json.loads(data["value"])
+					except ValueError:
+					    row[key] = data["value"]
+                if data["type"] == "file":
+                    fileList = map(lambda x : os.path.basename(x), data["value"].split(","))
+                    #print fileList
+                    fileToKeep.extend(filter(lambda x : x and x not in fileToKeep,fileList))
+        for item in fileToKeep:
+		    Files.objects.filter(name = item).update(stay = F("stay") + 1)
+		Files.objects.filter(stay = 0).update(delete = F("delete") + 1 )
+		
+	    for item in Files.objects.filter(delete__gt = 50):
+		    os.remove(item.path)
+			item.delete()
+			
+		if op == "add":
+		    es.index(index = "clue",doc_type = "clue",body = row ,refresh = True)
+			action = "新建线索数据"
+		else:
+		    _id = request.POST["_id"]
+			es.update(index ="clue", doc_type="clue",body={"doc":row},id = _id, refresh=True)
+			action= "编辑线索数据"
+		writeLog(request,action)
+		return HttpResponse('{"code":0}')
+		
+	except:
+	    logger.debug(traceback.format_exc() )
+		print traceback.format_exc()
+		return HttpResponse('{"code":1,"msg":"服务器异常"}')
+		
+	
+
+def statistics(request):
+    try:
+	    if request.method == "POST":
+		    _type = request.POST.get("type")
+			retData = []
+			if _type == "clue":
+			    _key = request.POST.get("key")
+				
+				mustList = []
+				
+				permsMustList = {"bool": {"should":[]}}
+				city = map(lambda x:x.perms.data,request.user.groups.get().group_perms_set.filter(perms__datatype="city") )
+				direction = map(lambda x:x.perms.data,request.user.groups.get().group_perms_set.filter(perms__datatype="direction") )
+				for item in city:
+				    if item == "省厅" ：
+					    permsMustList = False
+						break
+					else:
+					    permsMustList["bool"]["should"].append({"term":{"city":item}})
+				if permsMustList:
+				    for item in direction:
+					    permsMustList["bool"]["should"].append({"term":{"direction":item}})
+					mustList.append(permsMustList)
+				body = {
+				         "query":{
+						   "bool":{
+						     "must":mustList
+						   }
+						 },
+						 "size":0
+				        }
+				if _key in ["year","month]:
+				    _format = {"year":"yyyy年","month":"yyyy年MM月"}
+					
+					body["aggs"] ={
+					                "aa":{
+									  "date_histogram":{
+									    "field":"time",
+										"format": _format[_key],
+										"min_doc_count":1,
+										"interval": _key
+									  }
+									}  
+								  }
+					result = es.search(index="clue",doc_type="clue",body=body)
+                    retData = result["aggregations"]["aa"]["buckets"]
+                    for item in retData:
+                        item["key"] = item["key_as_string"]
+						
+					
+			    elif _key in ["controlip","url"]:
+    	            body["aggs"] = {
+					   "a1":{
+					     "nested":{
+						   "path":_key
+						 },
+						 "aggs":{
+						   "a2":{
+						     "filter":{
+							   "bool":{
+							     "must":{
+								   "term":{
+								     _key + ".key": "left"
+								   }
+								 }
+							   }
+							 },
+							 "aggs":{
+							   "a3":{
+							     "terms":{
+								   "field": _key + ".value"
+								 }
+							   }
+							 }
+						   }
+						 }
+					   }
+					  }
+					result = es.search(index="clue",doc_type="clue",body=body)
+					retData = result["aggregations"]["a1"]["a2"]["a3"]["buckets"]
+		
+            return HttpResponse(json.dumps(retData) )
+			
+
+
+			
+// actionlog.js
+
+$(function){
+    var columns = [
+	    {"data":"id","width":30,"name":"编号"},
+		{"data":"username","orderable":true,"width":80,"name":"操作用户"},
+		{"data":"ipaddr","orderable":true,"width":80,"name":"使用IP地址"},
+		{"data":"action_time","orderable":true,"width":120,"name":"操作时间"},
+		{"data":"action","orderable":true,"width":300,"name":"操作内容"},
+	];
+    if(canDelete){
+	    var buttonslist = [{
+		    "text":'<i class="remove icon"></i>删除',
+			"titleAttr":'删除',
+			"action":function(e,dt){
+			    UI.confirm({
+				    header:"警告",
+					content:"确定要删除所选记录？"，
+					actions:{
+					    yes:function(event){
+						    var ids = []
+							var selected = dt.rows('.selected').data();
+							$.each(selected,dunction(i,d){
+							    ids.push(d.id);
+							});
+							$.ajax({
+							    url:"/actionlog/log",
+								type:"POST",
+								dataType:"json",
+								data:{
+								    op:"delete",
+									ids:ids.join(",")
+								},
+								success:function(retData){
+								    if(retData.code){
+									    UI.alert(retData.msg);	
+									}else{
+									    UI.alert("删除成功！")
+										dt.ajax.reload();
+									}
+								},
+							});
+						},
+						no:function(event){
+						    return true;
+						}
+					}
+				});
+			},
+		} 
+		];
+		columns.unshift({
+		    "data":null,
+			"orderable":false,
+			"searchable":false,
+			"defaultContent":'<div class="ui fitted checkbox"><input type="checkbox"><label></label></div>',
+		});
+	}else{
+	    var buttonslist = [];
+	}
+	var t = $('#logDT').dataTable({
+	    "processing":true,
+		"serverSide":true,
+		"ajax":{
+		    "url":"/actionlog/log",
+			"type":"POST",
+			"data":function(d){
+			    return $.extend( {},d,{
+				    "searchcolumn": $("input#mycolumn").val() ? $("input#mycolumn").val() : "ALL",
+					"op": "get"
+				});
+			},
+		},
+		"columns":columns,
+		"order":[[canDelete,'asc']],
+		"dom":'<"ui autopadding gird"<"eight wide computor xixteen wide tablet sixteen wide mobile column"<"#toolbar">B><"eight wide computer sixteen wide tablet sixteen wide mobile right aligned column"<"mydataTableDropdown ui dropdown selection">f>>rt'
+		
+	});
+}
+
+
+
+def login(request):  
+    try:
+	    if request.method == "GET":
+		    if request.user.is_authenticated():
+			    return HttpResponseRedirect("usermange")
+			else:
+			    return HttpResponseRedirect("data/missionview")
+			return render(request,"login.html",{})
+		elif request.method == "POST" :
+		    username = request.POST('username')
+			password = request.POST('password')
+			try:
+			    checkuser = User.objects.get(username = username)
+			except Exception,e:
+			    if str(e).find("does not exist"):
+				    return render(request,"login.html",{"loginfaild":u"用户名不存在"})
+		    user = authenticate(username=username,password=password)
+			if user in not None:
+			    auth.login(request,user)
+				if user.is_superuser:
+				    return HttpResponseRedirect("usermange")
+				else:
+				    return HttpResponseRedirect("data/missionview")
+			else:
+			    return render(request,"login.html",{"loginfaild":u"密码错误"})
+	except:
+	    logger.debug(traceback.format_exc())
+		raise Http404
+		
+	
+
+def logout(request):
+    try:
+	    if request.user.is_authenticated():
+		    auth.logout(request)
+		return HttpResponseRedirect("/")
+	except:
+	    logger.debug(traceback.format_exc())
+		raise Http404
+		
+
+
+def ChatView(request):   //发送消息
+    try:	
+        if request.method == "POST":
+            message =request.POST.get('message')		
+			sender = request.user.username
+			receiver = request.POST.get('receiver')
+			isBroadcast = int(request.POST.get('broadcast'))  //判断接收者是否为全员
+			
+			nowTime = datetime.datetime.now()
+			h1 = ChatHistory.objects.create(message=message,sender=sender,receiver=receiver,broadcast=isBroadcast,unread=1,date=nowTime)
+			
+			wrappedMessage = json.dumps({"message":message,"sender":sender,"broadcast":isBroadcast,"id":h1.id,"date":datetime.datetime.strftime(nowTime,"%Y-%m-%d %H:%M:%S")})
+			redisMessage = RedisMessage(wrappedMessage)
+			if isBoradcast:
+			    userList = User.objects.all()
+				for user in userList:
+				    if user.username != sender:
+					    u1 = BroadcastUnreader.objects.create(message=h1,user=user.username)
+				redis_publisher = RedisPublisher(facility='foobar',broadcast=True)
+			else:
+			    redis_publisher = RedisPublisher(facility='foobar',users=[receiver])
+			redis_publisher.publish_message(redisMessage)
+			retData = {"code":0,"msg":[{"message":message,"sender":sender,"broadcast":isBroadcast,"date":datetime.datetime.strftime(nowTime,"%Y-%m-%d %H:%M:%S")}]}
+			return HttpResponse(json.dumps(retData))
+			
+	except:
+	    logger.debug(traceback.format_exc())
+		return HttpResponse('{"code":1}')
+		
+
+		
+def importClue(request0):
+    try:
+        fileObj	= request.FILES.get('file',None)
+		
+		
+		  
+	
+	
