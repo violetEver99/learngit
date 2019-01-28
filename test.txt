@@ -1,1 +1,126 @@
 I wish you have a good life
+
+
+SSH密钥允许您在计算机和GITLAB之间建立安全连接。
+在shell中生成SSH密钥之前，请检查系统是否已经运行了以下命令：
+
+type %userprofile%\.ssh\id_rsa.pub
+
+
+
+如果看到从 SSH RSA 开始的长字符串，则可以 跳过 SSH密钥生成步骤。
+注意：使用SSH密钥的密码是最好的做法，但它不是必需的，
+您可以通过按下Enter来跳过创建密码。请注意，您选择的密码不能更改或检索。
+若要生成新的SSH密钥，请使用以下命令：
+
+
+ssh-keygen -t rsa -C "wengwenxin@huaan.com"
+
+
+此命令将提示您找到一个位置和文件名来存储密钥对和密码。
+当提示输入位置和文件名时，只需按Enter使用默认值。
+如果使用不同的名称，密钥将不会自动使用。
+使用下面的命令显示公钥：
+
+
+type %userprofile%\.ssh\id_rsa.pub
+
+
+在用户配置文件的“SSH”选项卡下复制粘贴到“我的SSH密钥”部分的密钥。
+请复制完整的密钥从 SSH RSA 开始，并以用户名和主机结束。
+要将公钥复制到剪贴板，请使用下面的代码。根据你的操作系统，
+你需要使用一个不同的命令：
+
+type %userprofile%\.ssh\id_rsa.pub | clip
+
+
+部署密钥
+
+
+部署密钥允许用单个SSH密钥对多个项目进行只读访问。
+
+这对于克隆存储库到您的连续集成（CI）服务器非常有用。通过使用部署密钥，
+您不必设置虚拟用户帐户。
+
+
+如果您是项目主或所有者，则可以在“部署密钥”部分下的项目设置中添加部署密钥。
+
+按下“新部署键”按钮并上传一个公共SSH密钥。在此之后，使用相应私钥的机器对项目进行只读访问。
+
+不能使用“新部署密钥”选项添加相同的部署密钥两次。
+
+如果您想将相同的密钥添加到另一个项目中，请在列表中启用“从您可用的项目中部署密钥”。
+所有您可以访问的项目的所有部署密钥都可用。这个项目的访问可以通过项目的直接成员，或者通过一个小组来实现。
+有关更多信息，请参见app/models/user.rb中的def accessible_deploy_keys。
+
+部署密钥可以在项目之间共享，只需将它们添加到每个项目中即可。
+
+
+
+
+
+如果出于任何原因，您决定为GITLAB SSH密钥对指定一个非默认位置和文件名，
+则必须配置SSH客户端来查找GITLAB SSH私钥，以便连接到GITLAB服务器（也许是GITLAB）。
+对于OpenSSH客户端，这是在与//ssh／CONFIG文件一起处理的，与以下类似的节：
+
+#
+# Main gitlab.com server
+#
+Host gitlab.com
+RSAAuthentication yes
+IdentityFile ~/my-ssh-key-directory/my-gitlab-private-key-filename
+User mygitlabusername
+
+Another example
+
+#
+# Our company's internal GitLab server
+#
+Host my-gitlab.company.com
+RSAAuthentication yes
+IdentityFile ~/my-ssh-key-directory/company-com-private-key-filename
+
+
+注意，在上面的GITLab.com示例中，指定用户名来覆盖OpenSSH（本地用户名）的默认选择。
+仅当本地和远程用户名不同时才需要这样做。
+
+
+由于SSH客户端的种类繁多和配置选项非常多，对这些主题的进一步解释超出了本文的范围。
+
+公共SSH密钥必须是唯一的，因为它们将绑定到您的帐户。您的SSH密钥是通过SSH来推动代码时唯一的标识符
+。这就是为什么它需要唯一地映射到单个用户的原因。
+
+
+
+
+将本地项目上传到 gitlab中
+  1.在gitlab中新建一个项目
+  2.创建一个.ssh文件夹       
+        mkdir ~/.ssh
+  3.配置全局的name和email
+        git config --global user.name "名字"
+        git config --global user,email "邮箱地址"
+  4.生成key
+        ssh-keygen -t rsa -C "步骤3中的邮箱地址"
+  5.经过步骤4之后会在 c盘 -> 用户 -> 用户名 下生成一个 .ssh文件夹
+    文件夹中有 id_rsa 和 id_rsa.pub 两个文件
+  6.把 id_rsa.pub中的内容粘贴到gitlab密钥中，即新建一个ssh密钥
+
+  7.右键需要上传的项目 选择 Git Bash Here (本例子选中的文件夹名为“程序源代码”)
+  8.在git bash中输入一下命令：
+     git config --global user.name "名字"
+
+     git config --global user.email "邮箱地址"
+
+     git init       （git init把这个文件夹变成Git可管理的仓库）
+     
+git remote add origin ssh://git@42.123.127.93:10022/tyshawn/sdap1.git （在gitlab网页中获取，将两个仓库关联）
+     git add .
+git commit -m "程序源代码"   （-m 本次提交的注释内容）
+     
+git push -u origin master    （  由于新建的远程仓库是空的，所以要加上-u这个参数，等远程仓库里面有了内容之后，下次再从本地库上传内容的时候不需要添加 -u）
+
+
+
+ 
+
